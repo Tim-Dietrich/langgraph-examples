@@ -57,15 +57,16 @@ class ChatbotState(TypedDict):
 class Nodes(Enum):
     ENTRY = "entry"
     CHECKER = "checker"
-    ORDER_FORM = "order_form"
+    PIZZA_ORDER_FORM = "pizza_order_form"
     RETRIEVAL = "retrieval"
     END = "end"
 
+class OrderSlots(Enum):
+    CUSTOMER_ADDRESS = "customer_address"
 
 class PizzaOrderSlots(Enum):
     PIZZA_NAME = "pizza_name"
     PIZZA_COUNT = "pizza_count"
-    CUSTOMER_ADDRESS = "customer_address"
 
 class DesertOrderSlots(Enum):
     DESERT_NAME = "desert_name"
@@ -118,14 +119,14 @@ class CheckerNode:
         Routes to the next node
         """
         if state['active_order']:
-            logger.info("Routing to retrieval node")
+            # logger.info("Routing to retrieval node")
             return Nodes.RETRIEVAL.value
         else:
             logger.info("Routing to end node")
             return END
 
 
-class OrderNode:
+class PizzaOrderNode:
     """
     Collects the slots for the pizza order
     """
@@ -138,7 +139,7 @@ class OrderNode:
         Returns fallback message
         """
 
-        required_slots = [PizzaOrderSlots.PIZZA_NAME, PizzaOrderSlots.PIZZA_COUNT, PizzaOrderSlots.CUSTOMER_ADDRESS]
+        required_slots = [PizzaOrderSlots.PIZZA_NAME, PizzaOrderSlots.PIZZA_COUNT, OrderSlots.CUSTOMER_ADDRESS]
         missing_slots = [
             slot.value for slot in required_slots if slot.value not in state['slots'].keys()]
 
@@ -177,10 +178,10 @@ class OrderNode:
                     "ended": state["ended"]
                 }
 
-        elif next_slot == PizzaOrderSlots.CUSTOMER_ADDRESS.value:
-            if last_message is None or last_message.content != PizzaOrderSlots.CUSTOMER_ADDRESS.value:
+        elif next_slot == OrderSlots.CUSTOMER_ADDRESS.value:
+            if last_message is None or last_message.content != OrderSlots.CUSTOMER_ADDRESS.value:
                 state['messages'].append(AIMessage("What is your delivery address?"))
-                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.CUSTOMER_ADDRESS, name=PizzaOrderSlots.CUSTOMER_ADDRESS.value))
+                state["messages"].append(FunctionMessage(content=OrderSlots.CUSTOMER_ADDRESS, name=OrderSlots.CUSTOMER_ADDRESS.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
@@ -277,9 +278,9 @@ class RetrievalNode:
                 }
 
         # INFO: Customer Adress handling
-        elif last_message.content == PizzaOrderSlots.CUSTOMER_ADDRESS.value:
+        elif last_message.content == OrderSlots.CUSTOMER_ADDRESS.value:
             logger.info("Customer address collected: %s" % _input)
-            state['slots'][PizzaOrderSlots.CUSTOMER_ADDRESS.value] = _input
+            state['slots'][OrderSlots.CUSTOMER_ADDRESS.value] = _input
             return {
                 "messages": state["messages"],
                 "slots": state["slots"],
@@ -368,7 +369,7 @@ def display_graph():
 
 if __name__ == "__main__":
     # Initialize nodes
-    order_node = OrderNode()
+    pizza_order_node = PizzaOrderNode()
     checker_node = CheckerNode()
     retrieval_node = RetrievalNode()
     api_client = PizzaAPIClient()
@@ -376,7 +377,7 @@ if __name__ == "__main__":
     workflow = StateGraph(ChatbotState)
     workflow.add_node(Nodes.CHECKER.value, checker_node.invoke)
     workflow.add_node(Nodes.RETRIEVAL.value, retrieval_node.invoke)
-    workflow.add_node(Nodes.ORDER_FORM.value, order_node.invoke)
+    workflow.add_node(Nodes.PIZZA_ORDER_FORM.value, pizza_order_node.invoke)
 
     workflow.add_conditional_edges(
         Nodes.CHECKER.value,
@@ -386,8 +387,8 @@ if __name__ == "__main__":
             END: END,
         }
     )
-    workflow.add_edge(Nodes.RETRIEVAL.value, Nodes.ORDER_FORM.value)
-    workflow.add_edge(Nodes.ORDER_FORM.value, END)
+    workflow.add_edge(Nodes.RETRIEVAL.value, Nodes.PIZZA_ORDER_FORM.value)
+    workflow.add_edge(Nodes.PIZZA_ORDER_FORM.value, END)
 
     workflow.set_entry_point(Nodes.CHECKER.value)
     graph = workflow.compile()
