@@ -61,6 +61,7 @@ class Nodes(Enum):
 
 class OrderSlots(Enum):
     PIZZA_NAME = "pizza_name"
+    PIZZA_COUNT = "pizza_count"
     CUSTOMER_ADDRESS = "customer_address"
 
 
@@ -131,7 +132,7 @@ class OrderNode:
         Returns fallback message
         """
 
-        required_slots = [OrderSlots.PIZZA_NAME, OrderSlots.CUSTOMER_ADDRESS]
+        required_slots = [OrderSlots.PIZZA_NAME, OrderSlots.PIZZA_COUNT, OrderSlots.CUSTOMER_ADDRESS]
         missing_slots = [
             slot.value for slot in required_slots if slot.value not in state['slots'].keys()]
 
@@ -154,6 +155,16 @@ class OrderNode:
                 print("DEBUG: pizza name missing, appending")
                 state['messages'].append(AIMessage("What pizza would you like to order?"))
                 state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
+                return {
+                    "messages": state["messages"],
+                    "slots": state["slots"],
+                    "ended": state["ended"]
+                }
+
+        elif next_slot == OrderSlots.PIZZA_COUNT.value:
+            if last_message is None or last_message.content != OrderSlots.PIZZA_COUNT.value:
+                state['messages'].append(AIMessage("How many Pizza's do you want to order?"))
+                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
@@ -230,6 +241,32 @@ class RetrievalNode:
                 "slots": state["slots"],
                 "ended": state["ended"]
             }
+        elif last_message.content == OrderSlots.PIZZA_COUNT.value:
+            try:
+                pizza_count = int(_input)
+                if pizza_count < 1:
+                    state['messages'].append(AIMessage(content="Please enter a positive number of pizzas (at least 1)."))
+                    state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
+                    return {
+                        "messages": state["messages"],
+                        "slots": state["slots"],
+                        "ended": state["ended"]
+                    }
+                
+                state['slots'][OrderSlots.PIZZA_COUNT.value] = pizza_count
+                return {
+                    "messages": state["messages"],
+                    "slots": state["slots"],
+                    "ended": state["ended"]
+                }
+            except ValueError:
+                state['messages'].append(AIMessage(content="Please enter a valid number for the pizza count."))
+                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
+                return {
+                    "messages": state["messages"],
+                    "slots": state["slots"],
+                    "ended": state["ended"]
+                }
         elif last_message.content == OrderSlots.CUSTOMER_ADDRESS.value:
             logger.info("Customer address collected: %s" % _input)
             state['slots'][OrderSlots.CUSTOMER_ADDRESS.value] = _input
