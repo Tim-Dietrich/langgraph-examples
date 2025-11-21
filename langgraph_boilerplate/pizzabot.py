@@ -19,7 +19,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # LOGGING with colorformatter
 
-
 class ColorFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno == logging.INFO:
@@ -28,11 +27,15 @@ class ColorFormatter(logging.Formatter):
             return f"\033[93m{record.msg}\033[0m"  # yellow
         elif record.levelno == logging.ERROR:
             return f"\033[91m{record.msg}\033[0m"  # red
+        elif record.levelno == logging.DEBUG:
+            return f"\033[95m{record.msg}\033[0m"  # purple
+
+        return None
 
 
 formatter = ColorFormatter()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -59,11 +62,14 @@ class Nodes(Enum):
     END = "end"
 
 
-class OrderSlots(Enum):
+class PizzaOrderSlots(Enum):
     PIZZA_NAME = "pizza_name"
     PIZZA_COUNT = "pizza_count"
     CUSTOMER_ADDRESS = "customer_address"
 
+class DesertOrderSlots(Enum):
+    DESERT_NAME = "desert_name"
+    DESERT_COUNT = "desert_count"
 
 class CheckerNode:
     """
@@ -132,7 +138,7 @@ class OrderNode:
         Returns fallback message
         """
 
-        required_slots = [OrderSlots.PIZZA_NAME, OrderSlots.PIZZA_COUNT, OrderSlots.CUSTOMER_ADDRESS]
+        required_slots = [PizzaOrderSlots.PIZZA_NAME, PizzaOrderSlots.PIZZA_COUNT, PizzaOrderSlots.CUSTOMER_ADDRESS]
         missing_slots = [
             slot.value for slot in required_slots if slot.value not in state['slots'].keys()]
 
@@ -150,31 +156,31 @@ class OrderNode:
         next_slot = missing_slots[0]
         last_message = state["messages"][-1] if len(state["messages"]) > 0 else None
 
-        if next_slot == OrderSlots.PIZZA_NAME.value:
-            if last_message is None or last_message.content != OrderSlots.PIZZA_NAME.value:
-                print("DEBUG: pizza name missing, appending")
+        if next_slot == PizzaOrderSlots.PIZZA_NAME.value:
+            if last_message is None or last_message.content != PizzaOrderSlots.PIZZA_NAME.value:
+                logger.debug("pizza name missing, appending")
                 state['messages'].append(AIMessage("What pizza would you like to order?"))
-                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
+                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.PIZZA_NAME, name=PizzaOrderSlots.PIZZA_NAME.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
                     "ended": state["ended"]
                 }
 
-        elif next_slot == OrderSlots.PIZZA_COUNT.value:
-            if last_message is None or last_message.content != OrderSlots.PIZZA_COUNT.value:
+        elif next_slot == PizzaOrderSlots.PIZZA_COUNT.value:
+            if last_message is None or last_message.content != PizzaOrderSlots.PIZZA_COUNT.value:
                 state['messages'].append(AIMessage("How many Pizza's do you want to order?"))
-                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
+                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.PIZZA_COUNT, name=PizzaOrderSlots.PIZZA_COUNT.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
                     "ended": state["ended"]
                 }
 
-        elif next_slot == OrderSlots.CUSTOMER_ADDRESS.value:
-            if last_message is None or last_message.content != OrderSlots.CUSTOMER_ADDRESS.value:
+        elif next_slot == PizzaOrderSlots.CUSTOMER_ADDRESS.value:
+            if last_message is None or last_message.content != PizzaOrderSlots.CUSTOMER_ADDRESS.value:
                 state['messages'].append(AIMessage("What is your delivery address?"))
-                state["messages"].append(FunctionMessage(content=OrderSlots.CUSTOMER_ADDRESS, name=OrderSlots.CUSTOMER_ADDRESS.value))
+                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.CUSTOMER_ADDRESS, name=PizzaOrderSlots.CUSTOMER_ADDRESS.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
@@ -207,7 +213,8 @@ class RetrievalNode:
 
         _input = state['input'].lower().strip()
 
-        if last_message.content == OrderSlots.PIZZA_NAME.value:
+        # INFO: Pizza Name handling
+        if last_message.content == PizzaOrderSlots.PIZZA_NAME.value:
             available_pizzas = api_client.list_pizzas()
             pizza_names = [pizza['name'] for pizza in available_pizzas]
 
@@ -226,34 +233,35 @@ class RetrievalNode:
                 matched_pizza = next((pizza for pizza in available_pizzas if pizza['name'] == matched_pizza_name), None)
 
                 if confidence_score >= 70:
-                    # print("DEBUG: matched slots = ", matched_pizza)
                     print(f"-- Chatbot: For your request of '{_input}', I found: '{matched_pizza["name"]}' and added it to your order.")
-                    state['slots'][OrderSlots.PIZZA_NAME.value] = matched_pizza['name']
+                    state['slots'][PizzaOrderSlots.PIZZA_NAME.value] = matched_pizza['name']
 
             else:
                 # No match found at all
                 available_names = ", ".join(pizza_names)
                 state['messages'].append(AIMessage(content=f"I couldn't find '{_input}' on our menu. Available pizzas are: {available_names}"))
-                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
+                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.PIZZA_NAME, name=PizzaOrderSlots.PIZZA_NAME.value))
 
             return {
                 "messages": state["messages"],
                 "slots": state["slots"],
                 "ended": state["ended"]
             }
-        elif last_message.content == OrderSlots.PIZZA_COUNT.value:
+
+        # INFO: Pizza Count handling
+        elif last_message.content == PizzaOrderSlots.PIZZA_COUNT.value:
             try:
                 pizza_count = int(_input)
                 if pizza_count < 1:
                     state['messages'].append(AIMessage(content="Please enter a positive number of pizzas (at least 1)."))
-                    state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
+                    state["messages"].append(FunctionMessage(content=PizzaOrderSlots.PIZZA_COUNT, name=PizzaOrderSlots.PIZZA_COUNT.value))
                     return {
                         "messages": state["messages"],
                         "slots": state["slots"],
                         "ended": state["ended"]
                     }
                 
-                state['slots'][OrderSlots.PIZZA_COUNT.value] = pizza_count
+                state['slots'][PizzaOrderSlots.PIZZA_COUNT.value] = pizza_count
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
@@ -261,15 +269,17 @@ class RetrievalNode:
                 }
             except ValueError:
                 state['messages'].append(AIMessage(content="Please enter a valid number for the pizza count."))
-                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_COUNT, name=OrderSlots.PIZZA_COUNT.value))
+                state["messages"].append(FunctionMessage(content=PizzaOrderSlots.PIZZA_COUNT, name=PizzaOrderSlots.PIZZA_COUNT.value))
                 return {
                     "messages": state["messages"],
                     "slots": state["slots"],
                     "ended": state["ended"]
                 }
-        elif last_message.content == OrderSlots.CUSTOMER_ADDRESS.value:
+
+        # INFO: Customer Adress handling
+        elif last_message.content == PizzaOrderSlots.CUSTOMER_ADDRESS.value:
             logger.info("Customer address collected: %s" % _input)
-            state['slots'][OrderSlots.CUSTOMER_ADDRESS.value] = _input
+            state['slots'][PizzaOrderSlots.CUSTOMER_ADDRESS.value] = _input
             return {
                 "messages": state["messages"],
                 "slots": state["slots"],
@@ -355,9 +365,6 @@ def display_graph():
     ax.axis('off')
     plt.tight_layout()
     plt.show()
-
-# def test_routing_function(state: ChatbotState) -> str:
-#     return Nodes.CONFIRMATION
 
 if __name__ == "__main__":
     # Initialize nodes
