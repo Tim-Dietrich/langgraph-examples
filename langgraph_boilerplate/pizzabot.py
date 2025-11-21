@@ -12,6 +12,11 @@ from IPython.display import Image, display
 from PIL import Image as PILImage
 import logging
 
+from rapidfuzz import fuzz, process
+
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # LOGGING with colorformatter
 
 
@@ -142,29 +147,28 @@ class OrderNode:
             }
 
         next_slot = missing_slots[0]
+        last_message = state["messages"][-1] if len(state["messages"]) > 0 else None
+
         if next_slot == OrderSlots.PIZZA_NAME.value:
-            state['messages'].append(
-                AIMessage("What pizza would you like to order?"))
-            state["messages"].append(FunctionMessage(
-                content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
-            logger.info("Requesting pizza name")
-            return {
-                "messages": state["messages"],
-                "slots": state["slots"],
-                "ended": state["ended"]
-            }
+            if last_message is None or last_message.content != OrderSlots.PIZZA_NAME.value:
+                print("DEBUG: pizza name missing, appending")
+                state['messages'].append(AIMessage("What pizza would you like to order?"))
+                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
+                return {
+                    "messages": state["messages"],
+                    "slots": state["slots"],
+                    "ended": state["ended"]
+                }
 
         elif next_slot == OrderSlots.CUSTOMER_ADDRESS.value:
-            state['messages'].append(
-                AIMessage("What is your delivery address?"))
-            state["messages"].append(FunctionMessage(
-                content=OrderSlots.CUSTOMER_ADDRESS, name=OrderSlots.CUSTOMER_ADDRESS.value))
-            logger.info("Requesting customer address")
-            return {
-                "messages": state["messages"],
-                "slots": state["slots"],
-                "ended": state["ended"]
-            }
+            if last_message is None or last_message.content != OrderSlots.CUSTOMER_ADDRESS.value:
+                state['messages'].append(AIMessage("What is your delivery address?"))
+                state["messages"].append(FunctionMessage(content=OrderSlots.CUSTOMER_ADDRESS, name=OrderSlots.CUSTOMER_ADDRESS.value))
+                return {
+                    "messages": state["messages"],
+                    "slots": state["slots"],
+                    "ended": state["ended"]
+                }
         return None
 
 class RetrievalNode:
@@ -190,25 +194,37 @@ class RetrievalNode:
                 "ended": state["ended"]
             }
 
-        _input = state['input'].lower()
+        _input = state['input'].lower().strip()
 
         if last_message.content == OrderSlots.PIZZA_NAME.value:
-            # available_pizzas = api_client.list_pizzas()
-            # pizza_names = [pizza['name'].lower() for pizza in available_pizzas]
-            #
-            # print("input: " + _input)
-            # print("is in pizza_names: " + str(_input in pizza_names))
-            #
-            # if _input not in pizza_names:
-            #     state['messages'].append(AIMessage(content="Sorry, that pizza is not available. Please choose from our menu."))
-            #     return {
-            #         "messages": state["messages"],
-            #         "slots": state["slots"],
-            #         "ended": state["ended"]
-            #     }
+            available_pizzas = api_client.list_pizzas()
+            pizza_names = [pizza['name'] for pizza in available_pizzas]
 
-            logger.info("Pizza name collected: %s" % _input)
-            state['slots'][OrderSlots.PIZZA_NAME.value] = _input
+            # Use fuzzy matching to find the best match
+            best_match = process.extractOne(
+                _input,
+                pizza_names,
+                scorer=fuzz.partial_ratio,
+                score_cutoff=70
+            )
+
+            if best_match:
+                matched_pizza_name = best_match[0]
+                confidence_score = best_match[1]
+
+                matched_pizza = next((pizza for pizza in available_pizzas if pizza['name'] == matched_pizza_name), None)
+
+                if confidence_score >= 70:
+                    # print("DEBUG: matched slots = ", matched_pizza)
+                    print(f"-- Chatbot: For your request of '{_input}', I found: '{matched_pizza["name"]}' and added it to your order.")
+                    state['slots'][OrderSlots.PIZZA_NAME.value] = matched_pizza['name']
+
+            else:
+                # No match found at all
+                available_names = ", ".join(pizza_names)
+                state['messages'].append(AIMessage(content=f"I couldn't find '{_input}' on our menu. Available pizzas are: {available_names}"))
+                state["messages"].append(FunctionMessage(content=OrderSlots.PIZZA_NAME, name=OrderSlots.PIZZA_NAME.value))
+
             return {
                 "messages": state["messages"],
                 "slots": state["slots"],
@@ -233,6 +249,8 @@ class PizzaAPIClient:
             'accept': 'application/json',
             'Content-Type': 'application/json'
         })
+        # Disable SSL verification for outdated certificates
+        self.session.verify = False
 
     #   GET /pizza - List available pizzas
     def list_pizzas(self) -> List[Dict[str, Any]]:
@@ -287,6 +305,22 @@ class PizzaAPIClient:
             print(f"Error fetching order status: {e}")
             return {"status": "unknown", "error": str(e)}
 
+def display_graph():
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+    from io import BytesIO
+
+    png_data = graph.get_graph().draw_mermaid_png()
+    img = mpimg.imread(BytesIO(png_data))
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.imshow(img)
+    ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+# def test_routing_function(state: ChatbotState) -> str:
+#     return Nodes.CONFIRMATION
 
 if __name__ == "__main__":
     # Initialize nodes
@@ -314,11 +348,7 @@ if __name__ == "__main__":
     workflow.set_entry_point(Nodes.CHECKER.value)
     graph = workflow.compile()
 
-    img_data = graph.get_graph().draw_mermaid_png()
-    with open("pizzabot.png", "wb") as f:
-        f.write(img_data)
-
-    # save the image to a file
+    # display_graph()
 
     # START DIALOGUE: first message
     print("-- Chatbot: ", "Hi! I am a pizza bot. I can help you order a pizza. What would you like to order?")
